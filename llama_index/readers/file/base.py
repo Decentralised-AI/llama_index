@@ -5,16 +5,20 @@ from pathlib import Path
 from typing import Callable, Dict, Generator, List, Optional, Union, cast
 
 from llama_index.readers.base import BaseReader
-from llama_index.readers.file.base_parser import BaseParser, ImageParserOutput
+from llama_index.readers.file.base_parser import (
+    BaseParser,
+    ImageParserOutput,
+    TextWithMetadata,
+)
 from llama_index.readers.file.docs_parser import DocxParser, PDFParser
 from llama_index.readers.file.epub_parser import EpubParser
 from llama_index.readers.file.image_parser import ImageParser
+from llama_index.readers.file.ipynb_parser import IPYNBParser
 from llama_index.readers.file.markdown_parser import MarkdownParser
 from llama_index.readers.file.mbox_parser import MboxParser
 from llama_index.readers.file.slides_parser import PptxParser
 from llama_index.readers.file.tabular_parser import PandasCSVParser
 from llama_index.readers.file.video_audio import VideoAudioParser
-from llama_index.readers.file.ipynb_parser import IPYNBParser
 from llama_index.readers.schema.base import Document, ImageDocument
 
 DEFAULT_FILE_EXTRACTOR: Dict[str, BaseParser] = {
@@ -102,7 +106,7 @@ class SimpleDirectoryReader(BaseReader):
             self.input_files = self._add_files(self.input_dir)
 
         self.file_extractor = file_extractor or DEFAULT_FILE_EXTRACTOR
-        self.file_metadata = file_metadata
+        self.file_metadata_fn = file_metadata
 
     def _add_files(self, input_dir: Path) -> List[Path]:
         """Add files."""
@@ -172,8 +176,7 @@ class SimpleDirectoryReader(BaseReader):
         """
         # TODO: refactor parser output interface
         data: Union[str, List[str], ImageParserOutput] = ""
-        data_list: List[str] = []
-        metadata_list: List[Optional[dict]] = []
+        text_docs: List[Document] = []
         image_docs: List[ImageDocument] = []
         for input_file in self.input_files:
             if input_file.suffix.lower() in self.file_extractor:
@@ -186,34 +189,41 @@ class SimpleDirectoryReader(BaseReader):
                 with open(input_file, "r", errors=self.errors, encoding="utf8") as f:
                     data = f.read()
 
-            metadata: Optional[dict] = None
-            if self.file_metadata is not None:
-                metadata = self.file_metadata(str(input_file))
+            file_metadata: Optional[dict] = None
+            if self.file_metadata_fn is not None:
+                file_metadata = self.file_metadata_fn(str(input_file))
 
             if isinstance(data, ImageParserOutput):
                 # process image
                 image_docs.append(
-                    ImageDocument(text=data.text, extra_info=metadata, image=data.image)
+                    ImageDocument(
+                        text=data.text, extra_info=file_metadata, image=data.image
+                    )
                 )
             elif isinstance(data, List):
-                # process list of str
-                data_list.extend(data)
-                repeated_metadata: List[Optional[dict]] = [
-                    deepcopy(metadata) for _ in range(len(data))
-                ]
-                metadata_list.extend(repeated_metadata)
+                for item in data:
+                    if isinstance(item, TextWithMetadata):
+                        item_text = item.text
+                        item_metadata = item.metadata
+
+                        if file_metadata is not None:
+                            item_metadata.update(deepcopy(file_metadata))
+
+                        text_docs.append(
+                            Document(text=item_text, extra_info=item_metadata)
+                        )
+
+                    elif isinstance(item, str):
+                        text_docs.append(
+                            Document(text=item, extra_info=deepcopy(file_metadata))
+                        )
+                    else:
+                        raise ValueError(f"Unknown item type: {type(item)}")
             else:
-                # process single str
-                data_list.append(str(data))
-                metadata_list.append(metadata)
+                text_docs.append(Document(text=str(data), extra_info=file_metadata))
 
         if concatenate:
-            text_docs = [Document("\n".join(data_list))]
-        elif self.file_metadata is not None:
-            text_docs = [
-                Document(d, extra_info=m) for d, m in zip(data_list, metadata_list)
-            ]
-        else:
-            text_docs = [Document(d) for d in data_list]
+            text_docs = [Document("\n".join(doc.text)) for doc in text_docs]
+            # silently discard metadata
 
         return text_docs + cast(List[Document], image_docs)

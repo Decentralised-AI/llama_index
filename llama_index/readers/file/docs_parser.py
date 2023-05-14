@@ -4,9 +4,9 @@ Contains parsers for docx, pdf files.
 
 """
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
-from llama_index.readers.file.base_parser import BaseParser
+from llama_index.readers.file.base_parser import BaseParser, TextWithMetadata
 
 
 class PDFParser(BaseParser):
@@ -16,18 +16,18 @@ class PDFParser(BaseParser):
         """Init parser."""
         return {}
 
-    def parse_file(self, file: Path, errors: str = "ignore") -> str:
+    def parse_file(self, file: Path, errors: str = "ignore") -> List[TextWithMetadata]:
         """Parse file."""
         try:
-            import PyPDF2
+            import pypdf
         except ImportError:
             raise ImportError(
-                "PyPDF2 is required to read PDF files: `pip install PyPDF2`"
+                "pypdf is required to read PDF files: `pip install pypdf`"
             )
-        text_list = []
+        output = []
         with open(file, "rb") as fp:
             # Create a PDF object
-            pdf = PyPDF2.PdfReader(fp)
+            pdf = pypdf.PdfReader(fp)
 
             # Get the number of pages in the PDF document
             num_pages = len(pdf.pages)
@@ -36,10 +36,14 @@ class PDFParser(BaseParser):
             for page in range(num_pages):
                 # Extract the text from the page
                 page_text = pdf.pages[page].extract_text()
-                text_list.append(page_text)
-        text = "\n".join(text_list)
+                page_label = pdf.page_labels[page]
+                output.append(
+                    TextWithMetadata(
+                        text=page_text, metadata={"page_label": page_label}
+                    )
+                )
 
-        return text
+        return output
 
 
 class DocxParser(BaseParser):

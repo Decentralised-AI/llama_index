@@ -15,6 +15,12 @@ class ImageParserOutput:
     image: Optional[str] = None
 
 
+@dataclass
+class TextWithMetadata:
+    text: str
+    metadata: Dict[str, Union[str, float, int]]
+
+
 class BaseParser:
     """Base class for all parsers."""
 
@@ -46,5 +52,5 @@ class BaseParser:
     @abstractmethod
     def parse_file(
         self, file: Path, errors: str = "ignore"
-    ) -> Union[str, List[str], ImageParserOutput]:
+    ) -> Union[str, List[str], List[TextWithMetadata], ImageParserOutput]:
         """Parse file."""
